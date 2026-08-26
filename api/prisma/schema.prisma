@@ -1,0 +1,484 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-1.1.x", "debian-openssl-3.0.x", "rhel-openssl-1.0.x", "rhel-openssl-3.0.x", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ───────────────────────────────────────────────────────────────────
+
+enum Role {
+  CLIENT
+  LAWYER
+  ADMIN
+}
+
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+}
+
+enum AppointmentType {
+  ONLINE
+  PHYSICAL
+}
+
+enum DiaryEntryType {
+  CASE
+  HEARING
+  TASK
+  REMINDER
+}
+
+enum DiaryStatus {
+  OPEN
+  IN_PROGRESS
+  COMPLETED
+  ADJOURNED
+}
+
+enum MessageType {
+  TEXT
+  FILE
+}
+
+enum CaseType {
+  CIVIL
+  CRIMINAL
+  FAMILY
+  CORPORATE
+  CONSTITUTIONAL
+  PROPERTY
+  LABOUR
+  ANTI_TERRORISM
+  ACCOUNTABILITY
+  OTHER
+}
+
+enum CaseStatus {
+  OPEN
+  IN_PROGRESS
+  HEARING_SCHEDULED
+  CLOSED
+  STAYED
+  APPEALED
+}
+
+enum CourtType {
+  DISTRICT
+  HIGH
+  SUPREME
+  FEDERAL_SHARIAT
+  SPECIAL
+  REVENUE
+  LABOUR
+  FAMILY
+  ACCOUNTABILITY
+  OTHER
+}
+
+enum CourtProvince {
+  PUNJAB
+  SINDH
+  KPK
+  BALOCHISTAN
+  FEDERAL
+  AJK
+  GILGIT_BALTISTAN
+}
+
+enum HearingStatus {
+  SCHEDULED
+  HELD
+  ADJOURNED
+  CANCELLED
+  PART_HEARD
+}
+
+enum DocumentCategory {
+  PETITION
+  AFFIDAVIT
+  EVIDENCE
+  CONTRACT
+  COURT_ORDER
+  FIR
+  BAIL_ORDER
+  JUDGMENT
+  POWER_OF_ATTORNEY
+  VAKALATNAMA
+  OTHER
+}
+
+enum ESignatureStatus {
+  PENDING
+  SIGNED
+  DECLINED
+}
+
+enum FirmMemberRole {
+  OWNER
+  PARTNER
+  ASSOCIATE
+  PARALEGAL
+  CLERK
+}
+
+// ─── Models ──────────────────────────────────────────────────────────────────
+
+model User {
+  id           Int      @id @default(autoincrement())
+  email        String   @unique
+  passwordHash String
+  role         Role     @default(CLIENT)
+  phone        String?
+  fcmToken     String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  lawyerProfile LawyerProfile?
+  clientProfile ClientProfile?
+
+  sentMessages              Message[]           @relation("SentMessages")
+  notifications             Notification[]
+  uploadedDocuments         CaseDocument[]      @relation("UploadedDocuments")
+  signatureRequestsCreated  ESignatureRequest[] @relation("SignatureRequestsCreated")
+  signatureRequestsReceived ESignatureRequest[] @relation("SignatureRequestsReceived")
+  ownedFirm                 LawFirm?            @relation("FirmOwner")
+
+  @@map("users")
+}
+
+model LawyerProfile {
+  id                   Int                @id @default(autoincrement())
+  userId               Int                @unique
+  user                 User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fullName             String
+  barCouncilNumber     String             @unique
+  barCouncilDocUrl     String?
+  photoUrl             String?
+  bio                  String?            @db.Text
+  cities               Json               @default("[]")
+  experienceYears      Int                @default(0)
+  consultationFee      Decimal            @default(0) @db.Decimal(10, 2)
+  avgRating            Float              @default(0)
+  totalReviews         Int                @default(0)
+  googleAccessToken    String?            @db.Text
+  googleRefreshToken   String?            @db.Text
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  specializations LawyerSpecialization[]
+  availability    AvailabilitySlot[]
+  appointments    Appointment[]          @relation("LawyerAppointments")
+  conversations   Conversation[]         @relation("LawyerConversations")
+  diaryEntries    DiaryEntry[]
+  reviewsReceived Review[]               @relation("LawyerReviews")
+  cases           Case[]
+  firmMemberships FirmMember[]
+
+  @@index([avgRating])
+  @@index([consultationFee])
+  @@map("lawyer_profiles")
+}
+
+model ClientProfile {
+  id        Int      @id @default(autoincrement())
+  userId    Int      @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fullName  String
+  photoUrl  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  appointments  Appointment[]  @relation("ClientAppointments")
+  conversations Conversation[] @relation("ClientConversations")
+  reviewsGiven  Review[]       @relation("ClientReviews")
+  cases         Case[]
+
+  @@map("client_profiles")
+}
+
+model Specialization {
+  id      Int    @id @default(autoincrement())
+  name    String @unique
+  nameUr  String?
+
+  lawyers LawyerSpecialization[]
+
+  @@map("specializations")
+}
+
+model LawyerSpecialization {
+  lawyerId         Int
+  specializationId Int
+  lawyer           LawyerProfile  @relation(fields: [lawyerId], references: [id], onDelete: Cascade)
+  specialization   Specialization @relation(fields: [specializationId], references: [id], onDelete: Cascade)
+
+  @@id([lawyerId, specializationId])
+  @@map("lawyer_specializations")
+}
+
+model AvailabilitySlot {
+  id          Int           @id @default(autoincrement())
+  lawyerId    Int
+  lawyer      LawyerProfile @relation(fields: [lawyerId], references: [id], onDelete: Cascade)
+  dayOfWeek   Int           // 0=Sun, 1=Mon, ..., 6=Sat
+  startTime   String        // "09:00"
+  endTime     String        // "10:00"
+  isAvailable Boolean       @default(true)
+  createdAt   DateTime      @default(now())
+
+  @@unique([lawyerId, dayOfWeek, startTime])
+  @@map("availability_slots")
+}
+
+model Appointment {
+  id                   Int               @id @default(autoincrement())
+  clientId             Int
+  lawyerId             Int
+  client               ClientProfile     @relation("ClientAppointments", fields: [clientId], references: [id])
+  lawyer               LawyerProfile     @relation("LawyerAppointments", fields: [lawyerId], references: [id])
+  appointmentDate      DateTime
+  startTime            String
+  endTime              String
+  type                 AppointmentType   @default(PHYSICAL)
+  status               AppointmentStatus @default(PENDING)
+  meetingLink          String?
+  notes                String?           @db.Text
+  googleCalendarEventId String?
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+
+  review Review?
+
+  @@index([lawyerId, status])
+  @@index([lawyerId, appointmentDate])
+  @@map("appointments")
+}
+
+model Conversation {
+  id            Int           @id @default(autoincrement())
+  clientId      Int
+  lawyerId      Int
+  client        ClientProfile @relation("ClientConversations", fields: [clientId], references: [id])
+  lawyer        LawyerProfile @relation("LawyerConversations", fields: [lawyerId], references: [id])
+  lastMessageAt DateTime?
+  createdAt     DateTime      @default(now())
+
+  messages Message[]
+
+  @@unique([clientId, lawyerId])
+  @@index([lastMessageAt])
+  @@map("conversations")
+}
+
+model Message {
+  id             Int         @id @default(autoincrement())
+  conversationId Int
+  senderId       Int
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         User         @relation("SentMessages", fields: [senderId], references: [id])
+  content        String?     @db.Text
+  type           MessageType @default(TEXT)
+  fileUrl        String?
+  isRead         Boolean     @default(false)
+  createdAt      DateTime    @default(now())
+
+  @@index([conversationId, isRead])
+  @@map("messages")
+}
+
+model DiaryEntry {
+  id                   Int            @id @default(autoincrement())
+  lawyerId             Int
+  lawyer               LawyerProfile  @relation(fields: [lawyerId], references: [id], onDelete: Cascade)
+  type                 DiaryEntryType
+  status               DiaryStatus    @default(OPEN)
+  title                String
+  content              String?        @db.Text
+  hearingDate          DateTime?
+  reminderDate         DateTime?
+  clientName           String?
+  courtName            String?
+  googleCalendarEventId String?
+  caseId               Int?
+  case                 Case?          @relation(fields: [caseId], references: [id], onDelete: SetNull)
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+
+  @@index([lawyerId, type, status])
+  @@map("diary_entries")
+}
+
+model Review {
+  id            Int           @id @default(autoincrement())
+  clientId      Int
+  lawyerId      Int
+  appointmentId Int           @unique
+  client        ClientProfile @relation("ClientReviews", fields: [clientId], references: [id])
+  lawyer        LawyerProfile @relation("LawyerReviews", fields: [lawyerId], references: [id])
+  appointment   Appointment   @relation(fields: [appointmentId], references: [id])
+  rating        Int           // 1-5
+  comment       String?       @db.Text
+  createdAt     DateTime      @default(now())
+
+  @@index([lawyerId])
+  @@map("reviews")
+}
+
+model Notification {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  body      String
+  type      String
+  data      Json     @default("{}")
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId, isRead])
+  @@map("notifications")
+}
+
+// ─── Law Firm & Team Management ──────────────────────────────────────────────
+
+model LawFirm {
+  id                 Int      @id @default(autoincrement())
+  name               String
+  registrationNumber String?
+  address            String?
+  city               String?
+  province           String?
+  phone              String?
+  logoUrl            String?
+  ownerId            Int      @unique
+  owner              User     @relation("FirmOwner", fields: [ownerId], references: [id])
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  members FirmMember[]
+  cases   Case[]
+
+  @@map("law_firms")
+}
+
+model FirmMember {
+  id       Int            @id @default(autoincrement())
+  firmId   Int
+  firm     LawFirm        @relation(fields: [firmId], references: [id], onDelete: Cascade)
+  lawyerId Int
+  lawyer   LawyerProfile  @relation(fields: [lawyerId], references: [id], onDelete: Cascade)
+  role     FirmMemberRole @default(ASSOCIATE)
+  joinedAt DateTime       @default(now())
+
+  @@unique([firmId, lawyerId])
+  @@map("firm_members")
+}
+
+// ─── Full Case Management ─────────────────────────────────────────────────────
+
+model Case {
+  id              Int           @id @default(autoincrement())
+  caseNumber      String        // e.g. "2026/DC/LHR/001"
+  title           String
+  description     String?       @db.Text
+  caseType        CaseType      @default(OTHER)
+  status          CaseStatus    @default(OPEN)
+  courtName       String?
+  courtCity       String?
+  courtProvince   CourtProvince @default(FEDERAL)
+  courtType       CourtType     @default(DISTRICT)
+  firNumber       String?       // For criminal cases (FIR No.)
+  filingDate      DateTime?
+  lawyerId        Int
+  lawyer          LawyerProfile @relation(fields: [lawyerId], references: [id], onDelete: Cascade)
+  clientId        Int?
+  client          ClientProfile? @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  firmId          Int?
+  firm            LawFirm?      @relation(fields: [firmId], references: [id], onDelete: SetNull)
+  plaintiff       Json?         // { name: string, cnic?: string }
+  defendant       Json?         // { name: string, cnic?: string }
+  opposingCounsel Json?         // { name: string, firm?: string, phone?: string }
+  retainerAmount  Decimal?      @db.Decimal(10, 2)
+  notes           String?       @db.Text
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  hearings     HearingEntry[]
+  documents    CaseDocument[]
+  diaryEntries DiaryEntry[]
+
+  @@index([lawyerId, status])
+  @@index([lawyerId, updatedAt])
+  @@map("cases")
+}
+
+model HearingEntry {
+  id                    Int           @id @default(autoincrement())
+  caseId                Int
+  case                  Case          @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  hearingDate           DateTime
+  courtRoom             String?
+  judge                 String?
+  status                HearingStatus @default(SCHEDULED)
+  outcome               String?       @db.Text
+  nextHearingDate       DateTime?
+  orderText             String?       @db.Text
+  orderDocUrl           String?
+  googleCalendarEventId String?
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+
+  @@index([caseId, hearingDate])
+  @@map("hearing_entries")
+}
+
+// ─── Document Management & E-Signatures ──────────────────────────────────────
+
+model CaseDocument {
+  id                 Int              @id @default(autoincrement())
+  caseId             Int
+  case               Case             @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  uploadedById       Int
+  uploadedBy         User             @relation("UploadedDocuments", fields: [uploadedById], references: [id])
+  title              String
+  description        String?
+  fileUrl            String
+  fileType           String?
+  fileSizeBytes      Int?
+  category           DocumentCategory @default(OTHER)
+  isSharedWithClient Boolean          @default(false)
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  signatureRequests ESignatureRequest[]
+
+  @@map("case_documents")
+}
+
+model ESignatureRequest {
+  id                Int              @id @default(autoincrement())
+  documentId        Int
+  document          CaseDocument     @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  requestedById     Int
+  requestedBy       User             @relation("SignatureRequestsCreated", fields: [requestedById], references: [id])
+  requestedToId     Int
+  requestedTo       User             @relation("SignatureRequestsReceived", fields: [requestedToId], references: [id])
+  status            ESignatureStatus @default(PENDING)
+  signatureImageUrl String?          @db.Text
+  signedAt          DateTime?
+  declinedReason    String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  @@index([requestedById, status])
+  @@index([documentId, requestedToId])
+  @@map("e_signature_requests")
+}

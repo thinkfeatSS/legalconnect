@@ -1,0 +1,18 @@
+pluginManagement { includeBuild("../node_modules/@react-native/gradle-plugin") }
+plugins { id("com.facebook.react.settings") }
+extensions.configure(com.facebook.react.ReactSettingsExtension){ ex -> ex.autolinkLibrariesFromCommand() }
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
+    repositories {
+        maven {
+            url(new File(rootDir, "../node_modules/@react-native-async-storage/async-storage/android/local_repo").toURI())
+        }
+        google()
+        mavenCentral()
+    }
+}
+
+rootProject.name = 'app'
+include ':app'
+includeBuild('../node_modules/@react-native/gradle-plugin')
